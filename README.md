@@ -158,7 +158,9 @@ The server can be configured using a `config.json` file:
 
 ### Claude Desktop Integration
 
-Add to your Claude Desktop configuration file (usually located at `~/.config/claude-desktop/claude_desktop_config.json`):
+**Note**: Claude Desktop is not officially available for Linux. However, there are community solutions to run Claude Desktop on Linux by rebuilding the Windows package. Search for "Claude Desktop Linux" tutorials on YouTube or GitHub for installation methods.
+
+Once you have Claude Desktop running on Linux, add to your Claude Desktop configuration file (usually located at `~/.config/claude-desktop/claude_desktop_config.json`):
 
 ```json
 {
@@ -204,6 +206,22 @@ After adding this configuration:
 3. You can ask Claude to perform system operations like "Check my disk space" or "List files in my home directory"
 
 **Verification**: If the integration is successful, you should see "ubuntu-controller" listed as a connected server in Claude Desktop's status, and Claude will have access to system control tools.
+
+### Alternative MCP Clients
+
+If you prefer not to use Claude Desktop on Linux, you can use other MCP-compatible clients:
+
+**1. Direct MCP Protocol Testing:**
+```bash
+# Test with the built-in client
+python test_client.py
+```
+
+**2. Custom MCP Client:**
+You can build your own MCP client using the `mcp` Python package to interact with the server programmatically.
+
+**3. Web-based Solutions:**
+Some community projects provide web interfaces for MCP servers - check GitHub for "MCP web client" projects.
 
 ### Example Interactions
 
