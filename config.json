@@ -1,0 +1,37 @@
+{
+  "server": {
+    "name": "ubuntu-controller",
+    "version": "1.0.0",
+    "description": "MCP Server for Ubuntu System Control",
+    "log_level": "INFO"
+  },
+  "security": {
+    "policy_name": "safe",
+    "allowed_paths": [
+      "~/",
+      "/tmp",
+      "/var/tmp"
+    ],
+    "forbidden_paths": [
+      "/etc/passwd",
+      "/etc/shadow", 
+      "/root",
+      "/boot",
+      "/sys",
+      "/proc"
+    ],
+    "allowed_commands": [
+      "ls", "cat", "echo", "pwd", "whoami", "date", "uname",
+      "grep", "find", "which", "file", "head", "tail",
+      "apt", "dpkg", "snap", "git", "curl", "wget",
+      "python3", "pip3", "npm", "node", "docker"
+    ],
+    "forbidden_commands": [
+      "rm", "rmdir", "dd", "mkfs", "fdisk", "cfdisk",
+      "shutdown", "reboot", "halt", "init", "systemctl",
+      "service", "mount", "umount", "chmod", "chown"
+    ],
+    "max_command_timeout": 30,
+    "allow_sudo": false
+  }
+}
