@@ -362,7 +362,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔐 Security Disclosure
 
-If you discover a security vulnerability, please email [security@yourproject.com] instead of creating a public issue. We take security seriously and will respond promptly.
+If you discover a security vulnerability, please email [radjackbartok@proton.me] instead of creating a public issue. We take security seriously and will respond promptly.
 
 ## 🙏 Acknowledgments
 
@@ -383,6 +383,6 @@ If you discover a security vulnerability, please email [security@yourproject.com
 
 ---
 
-**Made with ❤️ for the security-conscious AI community**
+**Made for the security-conscious AI community**
 
 > 💡 **Pro Tip**: Start with the secure policy and gradually increase permissions as needed. It's easier to add permissions than to recover from a security incident!
