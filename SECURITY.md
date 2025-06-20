@@ -4,7 +4,7 @@
 
 🚨 **Please do not report security vulnerabilities through public GitHub issues.**
 
-If you discover a security vulnerability, please send an email to **security@yourproject.com** with:
+If you discover a security vulnerability, please send an email to **radjackbartok@proton.me** with:
 
 - A description of the vulnerability
 - Steps to reproduce the issue
