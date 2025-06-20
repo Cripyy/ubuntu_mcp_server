@@ -1,414 +1,388 @@
-# Ubuntu MCP Server
+# Secure Ubuntu MCP Server
 
-A Model Context Protocol (MCP) server that provides secure, controlled access to Ubuntu system operations. This server allows AI assistants to interact with Ubuntu systems through a well-defined protocol with configurable security policies.
+> 🔒 **Security-First** Model Context Protocol server for safe Ubuntu system operations
 
-## Features
+A hardened, production-ready [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that provides AI assistants with **secure, controlled access** to Ubuntu system operations. Built with comprehensive security controls, audit logging, and defense-in-depth principles.
 
-### 🔒 Security-First Design
-- **Path-based access control**: Only allows operations in explicitly permitted directories
-- **Command filtering**: Whitelist/blacklist approach for shell commands
-- **Configurable security policies**: Safe mode vs development mode
-- **Timeout protection**: Prevents runaway processes
-- **No sudo by default**: Can be enabled with explicit configuration
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Security Focused](https://img.shields.io/badge/security-focused-green.svg)](#security-features)
+[![MCP Compatible](https://img.shields.io/badge/MCP-compatible-blue.svg)](https://modelcontextprotocol.io/)
 
-### 🛠 Core Capabilities
-- **File Operations**: Read, write, list directories with permission checks
-- **Command Execution**: Run shell commands with security controls
-- **Package Management**: Search and install packages via apt
-- **System Information**: Get OS details, memory, disk usage
-- **Process Management**: With appropriate security policies
+## ✨ Key Features
 
-### 🏗 Architecture
-- **Modular Design**: Clear separation between security, controller, and MCP layers
-- **Production Ready**: Includes logging, error handling, and comprehensive testing
-- **Extensible**: Easy to add new tools and capabilities
+### 🛡️ Security-First Architecture
+- **Path traversal protection** - Symlink resolution with allowlist/denylist controls
+- **Command sanitization** - Shell injection prevention with safe argument parsing
+- **Resource limits** - File size, execution timeouts, and output size controls
+- **Comprehensive audit logging** - All operations logged with user attribution
+- **Defense in depth** - Multiple security layers with fail-safe defaults
 
-## Installation
+### 🎯 Core Capabilities
+- **File Operations** - Read, write, and list directories with permission validation
+- **Command Execution** - Safe shell command execution with whitelist/blacklist filtering
+- **System Information** - OS details, memory, and disk usage monitoring
+- **Package Management** - APT package search and listing (installation requires explicit config)
 
-1. **Clone and setup**:
+### 🏗️ Production Ready
+- **Modular design** with clear separation of concerns
+- **Comprehensive error handling** with meaningful error messages
+- **Extensive test suite** including security validation tests
+- **Configurable policies** for different use cases and environments
+- **Zero-dependency security** - Core security doesn't rely on external packages
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Ubuntu 18.04+ (tested on 20.04, 22.04, 24.04)
+- Python 3.9 or higher
+- Standard Unix utilities (ls, cat, echo, etc.)
+
+### Installation
+
 ```bash
-git clone <repository>
-cd ubuntu_mcp_server
-```
+# Clone the repository
+git clone https://github.com/yourusername/secure-ubuntu-mcp.git
+cd secure-ubuntu-mcp
 
-2. **Create virtual environment**:
-```bash
+# Create and activate virtual environment
 python3 -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# or
-.venv\Scripts\activate     # Windows
-```
+source .venv/bin/activate
 
-3. **Install dependencies**:
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-## Usage
-
-### Testing the Controller
-
-Run the built-in tests to verify everything works:
-
-```bash
+# Verify installation with built-in tests
 python main.py --test
 ```
 
-You should see output like:
-```
-=== Testing Ubuntu Controller ===
-
-1. Testing system info...
-OS: Ubuntu 24.04.2 LTS
-User: your_username
-Hostname: your_hostname
-
-2. Testing directory listing...
-Found X items in /home/your_username
-...
-
-✅ All tests passed!
-```
-
-### Running as MCP Server
-
-Start the server with default (safe) security policy:
+### Basic Usage
 
 ```bash
-python main.py
-```
+# Start with secure policy (recommended)
+python main.py --policy secure
 
-Or with development policy (more permissive):
-
-```bash
+# Start with development policy (more permissive)
 python main.py --policy dev
+
+# Test security measures
+python main.py --security-test
 ```
 
-### Testing with MCP Client
+## 🔧 Integration
 
-Run the test client to verify MCP protocol functionality:
+### Claude Desktop
+
+#### Getting Claude Desktop on Linux
+
+**Official Support**: Claude Desktop doesn't officially support Linux, but the community has created solutions!
+
+**Recommended Method**: Use the community Debian package by @aaddrick:
 
 ```bash
-python test_client.py --simple
+# Download and install Claude Desktop for Linux
+wget https://github.com/aaddrick/claude-desktop-debian/releases/latest/download/claude-desktop_latest_amd64.deb
+sudo dpkg -i claude-desktop_latest_amd64.deb
+sudo apt-get install -f  # Fix any dependency issues
 ```
 
-## Security Policies
+For other methods and troubleshooting, see: https://github.com/aaddrick/claude-desktop-debian
 
-### Safe Policy (Default)
-- **Allowed paths**: `~/`, `/tmp`, `/var/tmp`, `/opt`, `/usr/local`
-- **Forbidden paths**: `/etc/passwd`, `/etc/shadow`, `/root`, `/boot`, `/sys`, `/proc`
-- **Allowed commands**: Basic commands like `ls`, `cat`, `echo`, `apt`, `git`, `python3`
-- **Forbidden commands**: Destructive commands like `rm`, `dd`, `shutdown`, `mount`
+#### Configuration
+
+Once Claude Desktop is installed, add to your configuration (`~/.config/claude-desktop/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "secure-ubuntu": {
+      "command": "/path/to/secure-ubuntu-mcp/.venv/bin/python3",
+      "args": ["/path/to/secure-ubuntu-mcp/main.py", "--policy", "secure"],
+      "env": {
+        "MCP_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}
+```
+
+> ⚠️ **Important**: Use absolute paths and the virtual environment Python interpreter
+
+**Verification**: After restarting Claude Desktop, you should see "secure-ubuntu" listed as a connected server, and Claude will have access to system control tools.
+
+### Other MCP Clients
+
+The server implements the standard MCP protocol and works with any MCP-compatible client:
+
+```python
+# Example with mcp Python client
+import asyncio
+from mcp.client import ClientSession
+
+async def example():
+    # Connect to the server
+    # Implementation depends on your MCP client
+    pass
+```
+
+## 🛡️ Security Policies
+
+### Secure Policy (Default)
+Recommended for production and untrusted environments:
+
+- **Allowed Paths**: `~/`, `/tmp`, `/var/tmp`
+- **Forbidden Paths**: `/etc`, `/root`, `/boot`, `/sys`, `/proc`, `/dev`, `/usr`, `/bin`, `/sbin`
+- **Command Whitelist**: `ls`, `cat`, `echo`, `pwd`, `whoami`, `date`, `find`, `grep`, `apt` (search only)
+- **Resource Limits**: 1MB files, 15s timeouts, 256KB output
 - **Sudo**: Disabled
+- **Shell Execution**: Disabled (uses safe direct execution)
 
 ### Development Policy
-- **Allowed paths**: Includes `/var/log` in addition to safe policy paths
-- **Fewer forbidden paths**: Only critical system areas protected
-- **More commands allowed**: Nearly all commands except destructive ones
-- **Sudo**: Enabled (use with caution)
+More permissive for development environments:
 
-## Available MCP Tools
+- **Additional Allowed Paths**: `/opt`, `/usr/local`
+- **Fewer Restrictions**: Access to more system areas
+- **Larger Limits**: 10MB files, 60s timeouts, 1MB output
+- **More Commands**: Most development tools allowed
+- **Sudo**: Still disabled by default (can be enabled)
+
+### Custom Policies
+
+Create your own security policy:
+
+```python
+from main import SecurityPolicy
+
+custom_policy = SecurityPolicy(
+    allowed_paths=["/your/custom/paths"],
+    forbidden_paths=["/sensitive/areas"],
+    allowed_commands=["safe", "commands"],
+    forbidden_commands=["dangerous", "commands"],
+    max_command_timeout=30,
+    allow_sudo=False,  # Use with extreme caution
+    audit_actions=True
+)
+```
+
+## 🔍 Available Tools
 
 ### File Operations
 - `list_directory(path)` - List directory contents with metadata
-- `read_file(file_path)` - Read file contents with size limits
-- `write_file(file_path, content, create_dirs=False)` - Write content to file
+- `read_file(file_path)` - Read file contents with size validation
+- `write_file(file_path, content, create_dirs=False)` - Write with atomic operations
 
 ### System Operations
-- `execute_command(command, working_dir=None)` - Execute shell commands
+- `execute_command(command, working_dir=None)` - Execute shell commands safely
 - `get_system_info()` - Get OS, memory, and disk information
 
 ### Package Management
-- `search_packages(query)` - Search for packages using apt
-- `install_package(package_name, use_sudo=False)` - Install packages via apt
+- `search_packages(query)` - Search APT repositories
+- `install_package(package_name)` - Check package availability (listing only)
 
-## Configuration
+## 🔒 Security Features
 
-### Using config.json
+### Protection Against Common Attacks
 
-The server can be configured using a `config.json` file:
+**Path Traversal Prevention**:
+```bash
+# These are all blocked:
+../../../etc/passwd
+/etc/passwd
+/tmp/../etc/passwd
+symlinks_to_sensitive_files
+```
+
+**Command Injection Prevention**:
+```bash
+# These are all blocked:
+echo hello; rm -rf /
+echo `cat /etc/passwd`
+echo $(whoami)
+ls | rm -rf /
+```
+
+**Resource Exhaustion Protection**:
+- File size limits prevent memory exhaustion
+- Execution timeouts prevent hanging processes
+- Output size limits prevent log flooding
+- Directory listing limits prevent enumeration attacks
+
+### Audit Trail
+
+All operations are logged with:
+- User attribution
+- Timestamp and operation type
+- Full path resolution
+- Success/failure status
+- Security violation details
+
+## 🧪 Testing
+
+### Functionality Tests
+```bash
+# Test core functionality
+python main.py --test
+```
+
+### Security Validation
+```bash
+# Run comprehensive security tests
+python main.py --security-test
+```
+
+### Manual Testing
+```bash
+# Test MCP protocol directly
+python test_client.py --simple
+```
+
+## 📊 Example Usage
+
+Once integrated with an AI assistant:
+
+**System Monitoring**:
+> "Check my system status and disk space"
+
+**File Management**:
+> "List the files in my home directory and show me the largest ones"
+
+**Development Tasks**:
+> "Check if Python is installed and show me the version"
+
+**Log Analysis**:
+> "Look for any error files in my project directory"
+
+## ⚙️ Configuration
+
+### Environment Variables
+- `MCP_LOG_LEVEL` - Logging level (DEBUG, INFO, WARNING, ERROR)
+- `MCP_POLICY` - Security policy (secure, dev)
+- `MCP_CONFIG_PATH` - Path to custom configuration file
+
+### Configuration File
+Create `config.json` for custom settings:
 
 ```json
 {
   "server": {
-    "name": "ubuntu-controller",
+    "name": "secure-ubuntu-controller",
     "version": "1.0.0",
-    "description": "MCP Server for Ubuntu System Control",
     "log_level": "INFO"
   },
   "security": {
-    "policy_name": "safe",
-    "allowed_paths": ["~/", "/tmp", "/var/tmp"],
-    "forbidden_paths": ["/etc/passwd", "/etc/shadow", "/root"],
-    "allowed_commands": ["ls", "cat", "echo", "apt", "git"],
-    "forbidden_commands": ["rm", "dd", "shutdown", "reboot"],
+    "policy_name": "secure",
+    "allowed_paths": ["~/", "/tmp"],
     "max_command_timeout": 30,
-    "allow_sudo": false
+    "allow_sudo": false,
+    "audit_actions": true
   }
 }
 ```
 
-### Environment Variables
-
-- `MCP_LOG_LEVEL` - Set logging level (DEBUG, INFO, WARNING, ERROR)
-- `MCP_POLICY` - Set security policy (safe, dev)
-- `MCP_CONFIG_PATH` - Path to custom config file
-
-## Example Usage with AI Assistants
-
-### Claude Desktop Integration
-
-**Note**: Claude Desktop is not officially available for Linux. However, there are community solutions to run Claude Desktop on Linux by rebuilding the Windows package. Search for "Claude Desktop Linux" tutorials on YouTube or GitHub for installation methods.
-
-Once you have Claude Desktop running on Linux, add to your Claude Desktop configuration file (usually located at `~/.config/claude-desktop/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "ubuntu-controller": {
-      "command": "/path/to/ubuntu_mcp_server/.venv/bin/python3",
-      "args": ["/path/to/ubuntu_mcp_server/main.py"],
-      "env": {
-        "MCP_POLICY": "safe"
-      }
-    }
-  }
-}
-```
-
-**Important**: 
-- Replace `/path/to/ubuntu_mcp_server/` with the actual absolute path to your project directory
-- Use the **virtual environment Python interpreter** (`.venv/bin/python3`) to ensure all dependencies are available
-- Both the `command` and `args` paths must be absolute paths
-
-For example, if you cloned the project to `/home/username/ubuntu_mcp_server/`, the configuration would be:
-
-```json
-{
-  "mcpServers": {
-    "ubuntu-controller": {
-      "command": "/home/username/ubuntu_mcp_server/.venv/bin/python3",
-      "args": ["/home/username/ubuntu_mcp_server/main.py"],
-      "env": {
-        "MCP_POLICY": "safe"
-      }
-    }
-  }
-}
-```
-
-**Why use the virtual environment Python?**
-The Ubuntu MCP Server requires the `mcp` package and other dependencies that are installed in the virtual environment. Using the system Python (`python3`) will result in import errors because it doesn't have access to these packages.
-
-After adding this configuration:
-1. Restart Claude Desktop
-2. The Ubuntu Controller tools will be available in your conversations
-3. You can ask Claude to perform system operations like "Check my disk space" or "List files in my home directory"
-
-**Verification**: If the integration is successful, you should see "ubuntu-controller" listed as a connected server in Claude Desktop's status, and Claude will have access to system control tools.
-
-### Alternative MCP Clients
-
-If you prefer not to use Claude Desktop on Linux, you can use other MCP-compatible clients:
-
-**1. Direct MCP Protocol Testing:**
-```bash
-# Test with the built-in client
-python test_client.py
-```
-
-**2. Custom MCP Client:**
-You can build your own MCP client using the `mcp` Python package to interact with the server programmatically.
-
-**3. Web-based Solutions:**
-Some community projects provide web interfaces for MCP servers - check GitHub for "MCP web client" projects.
-
-### Example Interactions
-
-Once connected to an AI assistant, you can request operations like:
-
-**System Information**:
-> "What's the current system status and available disk space?"
-
-**File Management**:
-> "List the contents of my home directory and show me the largest files"
-
-**Development Tasks**:
-> "Check if Node.js is installed, and if not, install it"
-
-**Log Analysis**:
-> "Look for any recent errors in the system logs" (requires dev policy)
-
-## Security Considerations
-
-### Production Deployment
-
-For production use:
-
-1. **Review security policies** carefully for your environment
-2. **Use minimal permissions** - start with safe policy and expand as needed
-3. **Monitor logs** for any suspicious activity
-4. **Regular updates** of the server and dependencies
-5. **Network isolation** if running remotely
-
-### Security Features
-
-- **Path traversal protection**: Prevents access outside allowed directories
-- **Command injection prevention**: Validates and sanitizes all commands
-- **Resource limits**: Timeouts and file size limits prevent resource exhaustion
-- **Audit logging**: All operations are logged for security monitoring
-
-## Development
+## 🛠️ Development
 
 ### Adding New Tools
 
-To add a new MCP tool, edit the `create_ubuntu_mcp_server` function:
-
 ```python
-@mcp.tool("your_new_tool")
-async def your_new_tool(param1: str, param2: int = 10) -> str:
-    """Description of your tool
-    
-    Args:
-        param1: Description of parameter
-        param2: Optional parameter with default
-        
-    Returns:
-        Description of return value
-    """
+@mcp.tool("your_tool_name")
+async def your_tool(param: str) -> str:
+    """Tool description for AI assistant"""
     try:
-        # Your implementation here
-        result = controller.your_method(param1, param2)
+        # Use controller methods for safe operations
+        result = controller.safe_operation(param)
         return json.dumps(result, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=2)
 ```
 
-### Extending Security Policies
-
-Create custom security policies by extending the `SecurityPolicy` class:
+### Extending Security
 
 ```python
 def create_custom_policy() -> SecurityPolicy:
+    """Create a custom security policy"""
     return SecurityPolicy(
-        allowed_paths=["/your/custom/paths"],
-        forbidden_paths=["/sensitive/areas"],
-        allowed_commands=["your", "allowed", "commands"],
+        allowed_paths=["/your/paths"],
         forbidden_commands=["dangerous", "commands"],
-        max_command_timeout=60,
-        allow_sudo=True  # Use with extreme caution
+        # ... other settings
     )
 ```
 
-### Testing
-
-Run the comprehensive test suite:
-
-```bash
-# Test core functionality
-python main.py --test
-
-# Test MCP client integration
-python test_client.py --simple
-
-# Test with actual MCP protocol
-python test_client.py
-```
-
-## Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
-**Server starts then appears to hang**:
-This is normal behavior! MCP servers are designed to run indefinitely and communicate via stdin/stdout. The server is waiting for MCP protocol messages from Claude Desktop or another MCP client.
+**"Server appears to hang"**
+- This is normal! MCP servers run continuously and communicate via stdio
+- The server is waiting for MCP protocol messages
 
-**Import errors for MCP (`ModuleNotFoundError: No module named 'mcp'`)**:
-This usually means Claude Desktop is trying to use the system Python instead of the virtual environment Python. Make sure your Claude Desktop configuration uses the full path to the virtual environment Python interpreter:
-```json
-"command": "/path/to/ubuntu_mcp_server/.venv/bin/python3"
-```
-NOT just `"command": "python3"`
+**"ModuleNotFoundError: No module named 'mcp'"**
+- Ensure you're using the virtual environment Python interpreter
+- Check your Claude Desktop config uses the full path to `.venv/bin/python3`
 
-If you still have issues:
-```bash
-# Activate virtual environment and reinstall
-source .venv/bin/activate
-pip install --upgrade mcp
-```
+**"SecurityViolation" errors**
+- Check if the path/command is allowed by your security policy
+- Review audit logs at `/tmp/ubuntu_mcp_audit.log`
+- Consider using development policy for testing
 
-**Permission denied errors**:
-- Check that your user has access to the requested paths
-- Verify security policy allows the operation
-- For sudo operations, ensure `allow_sudo: true` in config
-
-**Command timeout errors**:
-- Increase `max_command_timeout` in security policy
-- Check if command is hanging or requires interaction
-
-**File not found errors**:
-- Verify path is within allowed directories
-- Check file permissions and existence
-
-### Testing the Server
-
-To verify the server works correctly:
-
-```bash
-# Test core functionality
-python main.py --test
-
-# Test server startup (should stay running)
-python main.py --policy safe
-# Press Ctrl+C to stop
-
-# Test with development policy
-python main.py --policy dev
-```
+**"Permission denied" errors**
+- Verify your user has access to the requested paths
+- Check file/directory permissions with `ls -la`
 
 ### Debug Mode
 
-Enable debug logging:
-
 ```bash
-python main.py --log-level DEBUG
+# Enable verbose logging
+python main.py --log-level DEBUG --policy secure
+
+# Check audit logs
+tail -f /tmp/ubuntu_mcp_audit.log
 ```
 
-Or set environment variable:
+## 🤝 Contributing
 
-```bash
-export MCP_LOG_LEVEL=DEBUG
-python main.py
-```
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
-## Contributing
-
+### Development Setup
 1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes with tests
+4. Ensure all tests pass: `python main.py --test && python main.py --security-test`
 5. Submit a pull request
 
-### Code Style
-
+### Code Standards
 - Follow PEP 8 style guidelines
-- Add type hints for all functions
+- Add type hints for all public functions
 - Include comprehensive docstrings
-- Write tests for new features
+- Write tests for new functionality
+- Maintain security-first principles
 
-## License
+## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Security Disclosure
+## 🔐 Security Disclosure
 
-If you discover a security vulnerability, please send an email to [security@yourproject.com] instead of creating a public issue.
+If you discover a security vulnerability, please email [security@yourproject.com] instead of creating a public issue. We take security seriously and will respond promptly.
 
-## Changelog
+## 🙏 Acknowledgments
 
-### v1.0.0
-- Initial release
-- Core file and command operations
-- Security policy system
-- MCP protocol integration
-- Package management tools
-- Comprehensive testing suite
+- [Model Context Protocol](https://modelcontextprotocol.io/) team for the excellent protocol
+- Security researchers and the infosec community for best practices
+- Python security community for ongoing guidance
+
+## 📈 Roadmap
+
+- [ ] **Enhanced Logging** - Structured JSON logging with more context
+- [ ] **Container Support** - Docker integration and container-aware policies  
+- [ ] **Network Tools** - Safe networking utilities (ping, traceroute, etc.)
+- [ ] **Process Management** - Safe process monitoring and control
+- [ ] **Configuration UI** - Web interface for policy management
+- [ ] **Integration Tests** - Comprehensive end-to-end testing
+- [ ] **Performance Optimization** - Caching and performance improvements
+- [ ] **Multi-User Support** - Role-based access controls
+
+---
+
+**Made with ❤️ for the security-conscious AI community**
+
+> 💡 **Pro Tip**: Start with the secure policy and gradually increase permissions as needed. It's easier to add permissions than to recover from a security incident!
