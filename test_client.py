@@ -85,10 +85,10 @@ async def simple_test():
     """Simple test without full MCP protocol"""
     print("🧪 Running simple functionality test...")
     
-    from main import create_safe_policy, UbuntuController
+    from main import create_secure_policy, SecureUbuntuController
     
-    policy = create_safe_policy()
-    controller = UbuntuController(policy)
+    policy = create_secure_policy()
+    controller = SecureUbuntuController(policy)
     
     # Test basic operations
     print("✅ Controller created")
