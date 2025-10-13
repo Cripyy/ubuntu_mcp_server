@@ -5,6 +5,33 @@
     "description": "MCP Server for Ubuntu System Control",
     "log_level": "INFO"
   },
+  "network": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8585
+  },
+  "remotes": [
+    {
+      "name": "local",
+      "type": "local"
+    },
+    {
+      "name": "raspberry-pi",
+      "type": "ssh",
+      "host": "192.168.1.30",
+      "port": 22,
+      "user": "marius",
+      "key_path": "/home/marius/.ssh/id_ed25519"
+    },
+    {
+      "name": "homeassistant-server",
+      "type": "ssh",
+      "host": "192.168.1.15",
+      "port": 22,
+      "user": "orangepi",
+      "key_path": "/home/marius/.ssh/id_ed25519"
+    }
+  ],
   "security": {
     "policy_name": "safe",
     "allowed_paths": [
@@ -14,7 +41,7 @@
     ],
     "forbidden_paths": [
       "/etc/passwd",
-      "/etc/shadow", 
+      "/etc/shadow",
       "/root",
       "/boot",
       "/sys",
