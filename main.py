@@ -1,5 +1,5 @@
 """
-Secure Ubuntu MCP Server (Remote-capable version)
+Secure Ubuntu MCP Server (HTTPS Remote version)
 """
 
 import argparse
@@ -8,33 +8,30 @@ import json
 import logging
 import os
 import sys
-from fastapi import FastAPI, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-
-# Import your original security + MCP code
-from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 from typing import Any, Dict
 from dataclasses import dataclass, field
 from enum import Enum
-import shutil
-import pwd, grp, stat, time, tempfile, hashlib, shlex, subprocess, re
+import shlex
+import pwd, grp, stat, tempfile, shutil, time, subprocess, re
 
-# -----------------------------------------------------------------------------
-# Security policy + controller definitions
-# -----------------------------------------------------------------------------
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from mcp.server.fastmcp import FastMCP
+from uvicorn import Config, Server
+
+# --------------------------------------------------------------------------
+# Core security model
+# --------------------------------------------------------------------------
 
 class SecurityViolation(Exception):
     pass
-
 
 class PermissionLevel(Enum):
     READ_ONLY = "read_only"
     SAFE_WRITE = "safe_write"
     SYSTEM_ADMIN = "system_admin"
     RESTRICTED = "restricted"
-
 
 @dataclass
 class SecurityPolicy:
@@ -46,11 +43,7 @@ class SecurityPolicy:
     max_command_timeout: int = 30
     max_file_size: int = 10 * 1024 * 1024
     max_output_size: int = 1024 * 1024
-    max_directory_items: int = 1000
     allow_sudo: bool = False
-    resolve_symlinks: bool = True
-    audit_actions: bool = True
-
 
 class SecureUbuntuController:
     def __init__(self, policy: SecurityPolicy):
@@ -73,15 +66,12 @@ class SecureUbuntuController:
             cwd=working_dir or None,
             env=env,
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=self.policy.max_command_timeout,
-        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.policy.max_command_timeout)
         return {
             "return_code": process.returncode,
-            "stdout": stdout.decode(),
-            "stderr": stderr.decode(),
-            "command": command,
+            "stdout": stdout.decode(errors="replace"),
+            "stderr": stderr.decode(errors="replace"),
+            "command": command
         }
 
     def list_directory(self, path: str):
@@ -114,6 +104,9 @@ class SecureUbuntuController:
             "user": self.current_user,
         }
 
+# --------------------------------------------------------------------------
+# Policy presets
+# --------------------------------------------------------------------------
 
 def create_secure_policy() -> SecurityPolicy:
     home_dir = os.path.expanduser("~")
@@ -132,59 +125,84 @@ def create_secure_policy() -> SecurityPolicy:
             "service", "mount", "umount", "chmod", "chown"
         ],
         allow_sudo=False,
-        resolve_symlinks=True,
-        audit_actions=True,
     )
 
-# -----------------------------------------------------------------------------
-# MCP Server setup
-# -----------------------------------------------------------------------------
+def create_development_policy() -> SecurityPolicy:
+    home_dir = os.path.expanduser("~")
+    return SecurityPolicy(
+        allowed_paths=[home_dir, "/tmp", "/var/tmp", "/opt", "/usr/local"],
+        forbidden_paths=["/etc/shadow", "/root"],
+        allowed_commands=[],
+        forbidden_commands=["rm", "shutdown", "reboot"],
+        allow_sudo=False,
+        command_whitelist_mode=False
+    )
+
+# --------------------------------------------------------------------------
+# MCP setup
+# --------------------------------------------------------------------------
 
 def create_ubuntu_mcp_server(policy: SecurityPolicy) -> FastMCP:
     controller = SecureUbuntuController(policy)
     mcp = FastMCP("Ubuntu MCP Server")
 
+    # Track tools manually (since FastMCP doesn’t expose them)
+    mcp.tool_registry = {}
+
+    def register_tool(name):
+        def wrapper(fn):
+            mcp.tool(name)(fn)
+            mcp.tool_registry[name] = fn
+            return fn
+        return wrapper
+
     def to_json(data):
         return json.dumps(data, indent=2)
 
-    @mcp.tool("execute_command")
+    @register_tool("execute_command")
     async def execute_command(command: str, working_dir: str = None):
         result = await controller.execute_command(command, working_dir)
         return to_json(result)
 
-    @mcp.tool("list_directory")
+    @register_tool("list_directory")
     async def list_directory(path: str):
         return to_json(controller.list_directory(path))
 
-    @mcp.tool("read_file")
+    @register_tool("read_file")
     async def read_file(file_path: str):
         return controller.read_file(file_path)
 
-    @mcp.tool("write_file")
+    @register_tool("write_file")
     async def write_file(file_path: str, content: str):
         success = controller.write_file(file_path, content)
         return to_json({"success": success, "path": file_path})
 
-    @mcp.tool("get_system_info")
+    @register_tool("get_system_info")
     async def get_system_info():
         return to_json(controller.get_system_info())
 
     return mcp
 
-# -----------------------------------------------------------------------------
-# FastAPI Web Wrapper for remote access
-# -----------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# FastAPI HTTPS Wrapper
+# --------------------------------------------------------------------------
 
 async def main():
     parser = argparse.ArgumentParser(description="Ubuntu MCP Server")
+    parser.add_argument("--policy", choices=["secure", "dev"], default="secure", help="Security policy to use")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level.upper())
 
-    policy = create_secure_policy()
+    # Load selected policy
+    if args.policy == "dev":
+        policy = create_development_policy()
+    else:
+        policy = create_secure_policy()
+
     mcp_server = create_ubuntu_mcp_server(policy)
 
-    # Load network configuration
+    # Load network settings
     with open("config.json") as f:
         config = json.load(f)
     network_cfg = config.get("network", {})
@@ -194,7 +212,7 @@ async def main():
     certfile = network_cfg.get("ssl_certfile", "/etc/ssl/mcp/mcp.crt")
     keyfile = network_cfg.get("ssl_keyfile", "/etc/ssl/mcp/mcp.key")
 
-    # --- FastAPI wrapper ---
+    # FastAPI
     app = FastAPI(title="Ubuntu MCP Remote Server")
     app.add_middleware(
         CORSMiddleware,
@@ -206,15 +224,15 @@ async def main():
 
     @app.get("/")
     async def root():
-        return {"status": "ok", "message": "Ubuntu MCP Server is running", "host": host, "port": port}
+        return {"status": "ok", "message": "Ubuntu MCP Server running", "policy": args.policy}
 
     @app.get("/mcp/tools")
     async def list_tools():
-        return {"tools": list(mcp_server.tool.keys())}
+        return {"tools": list(mcp_server.tool_registry.keys())}
 
     @app.post("/mcp")
     async def mcp_entry(request: Request):
-        """Dispatch JSON request to MCP tool."""
+        """Dispatch request to the appropriate MCP tool."""
         try:
             data = await request.json()
             tool_name = data.get("tool")
@@ -223,25 +241,20 @@ async def main():
             if not tool_name:
                 return Response(json.dumps({"error": "Missing 'tool'"}), status_code=400)
 
-            tool_func = mcp_server.tool.get(tool_name)
+            tool_func = mcp_server.tool_registry.get(tool_name)
             if not tool_func:
                 return Response(json.dumps({"error": f"Tool '{tool_name}' not found"}), status_code=404)
 
-            if asyncio.iscoroutinefunction(tool_func):
-                result = await tool_func(**args)
-            else:
-                result = tool_func(**args)
-
+            result = await tool_func(**args) if asyncio.iscoroutinefunction(tool_func) else tool_func(**args)
             if not isinstance(result, str):
                 result = json.dumps(result)
             return Response(result, media_type="application/json")
         except Exception as e:
             return Response(json.dumps({"error": str(e)}), status_code=500)
 
-    # --- Start HTTPS server ---
-    print(f"🔐 Serving Ubuntu MCP on https://{host}:{port}")
-    from uvicorn import Config, Server
+    # Start HTTPS server
     ssl_params = {"ssl_certfile": certfile, "ssl_keyfile": keyfile} if use_https else {}
+    print(f"🔐 Serving Ubuntu MCP on {'https' if use_https else 'http'}://{host}:{port}  [policy={args.policy}]")
     config = Config(app=app, host=host, port=port, **ssl_params)
     server = Server(config)
     await server.serve()
