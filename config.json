@@ -8,7 +8,10 @@
   "network": {
     "enabled": true,
     "host": "0.0.0.0",
-    "port": 8585
+    "port": 8585,
+    "use_https": true,
+    "ssl_certfile": "/etc/ssl/mcp/mcp.crt",
+    "ssl_keyfile": "/etc/ssl/mcp/mcp.key"
   },
   "remotes": [
     {
