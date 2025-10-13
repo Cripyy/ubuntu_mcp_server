@@ -985,7 +985,7 @@ async def main():
 
     # Read host/port from environment or CLI
     host = os.getenv("MCP_HOST", "0.0.0.0")
-    port = int(os.getenv("MCP_PORT", "8585"))
+    port = int(os.getenv("MCP_PORT", "8080"))
 
     # Optional simple API key check for extra protection
     api_key = os.getenv("MCP_API_KEY", None)
@@ -1013,3 +1013,16 @@ async def main():
 
     # Run as remote server
     mcp_server.run(host=host, port=port)
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 Secure Ubuntu MCP Server stopped by user.", file=sys.stderr)
+    except Exception as e:
+        logging.getLogger(__name__).critical(f"Server exited with a critical error: {e}", exc_info=True)
+        sys.exit(1)
