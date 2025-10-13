@@ -956,49 +956,48 @@ async def test_controller():
 
 
 async def main():
-    """Main entry point"""
+    """Main async setup logic."""
     parser = argparse.ArgumentParser(description="Secure Ubuntu MCP Server")
-    parser.add_argument("--policy", choices=["secure", "dev"], default="secure", help="Security policy to use")
-    parser.add_argument("--test", action="store_true", help="Run functionality tests")
-    parser.add_argument("--security-test", action="store_true", help="Run security validation tests")
-    parser.add_argument("--log-level", default="INFO", help="Logging level (e.g., DEBUG, INFO, WARNING)")
+    parser.add_argument("--policy", choices=["secure", "dev"], default="secure")
+    parser.add_argument("--test", action="store_true")
+    parser.add_argument("--security-test", action="store_true")
+    parser.add_argument("--log-level", default="INFO")
 
     args = parser.parse_args()
-
-    logging.basicConfig(level=args.log_level.upper(), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=args.log_level.upper(),
+                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     if args.security_test:
         success = await run_security_tests()
         sys.exit(0 if success else 1)
-
     if args.test:
         await test_controller()
         return
 
-    if args.policy == "dev":
-        policy = create_development_policy()
-    else:
-        policy = create_secure_policy()
-
+    policy = create_development_policy() if args.policy == "dev" else create_secure_policy()
     print(f"Starting Secure Ubuntu MCP Server with '{args.policy}' policy...", file=sys.stderr)
-    mcp_server = create_ubuntu_mcp_server(policy)
+    return policy
 
-    # --- Load network config from config.json ---
+
+if __name__ == "__main__":
+    import sys
+    import uvicorn
     import json
     from fastapi import FastAPI
-    import uvicorn
     from fastapi.middleware.cors import CORSMiddleware
 
+    policy = asyncio.run(main())
+    mcp_server = create_ubuntu_mcp_server(policy)
+
+    # --- Load network config ---
     with open("config.json") as f:
         config = json.load(f)
     network_cfg = config.get("network", {})
     host = network_cfg.get("host", "0.0.0.0")
     port = int(network_cfg.get("port", 8080))
 
-    # --- Create a FastAPI wrapper around MCP ---
+    # --- Build FastAPI wrapper ---
     app = FastAPI(title="Ubuntu MCP Remote Server")
-
-    # Optional CORS support
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -1007,41 +1006,9 @@ async def main():
         allow_headers=["*"],
     )
 
-    # Basic root route for health check
     @app.get("/")
     async def root():
         return {"status": "ok", "message": "Ubuntu MCP Server is running"}
 
-    # MCP endpoint: forward requests to the MCP handler
-    from fastapi import Request, Response
-
-    @app.post("/mcp")
-    async def handle_mcp(request: Request):
-        """Forward HTTP POST body to MCP stdin/stdout."""
-        body = await request.body()
-        try:
-            # Run the MCP server logic directly (simulate stdio call)
-            reader = asyncio.StreamReader()
-            protocol = asyncio.StreamReaderProtocol(reader)
-            transport, _ = await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, os.fdopen(0))
-            response_data = await mcp_server.handle(body.decode("utf-8"))
-            return Response(response_data, media_type="application/json")
-        except Exception as e:
-            return Response(str(e), status_code=500)
-
-    # --- Start the HTTP server ---
     print(f"Serving MCP on http://{host}:{port}")
     uvicorn.run(app, host=host, port=port)
-
-
-if __name__ == "__main__":
-    import argparse
-    import sys
-
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 Secure Ubuntu MCP Server stopped by user.", file=sys.stderr)
-    except Exception as e:
-        logging.getLogger(__name__).critical(f"Server exited with a critical error: {e}", exc_info=True)
-        sys.exit(1)
