@@ -983,36 +983,55 @@ async def main():
     print(f"Starting Secure Ubuntu MCP Server with '{args.policy}' policy...", file=sys.stderr)
     mcp_server = create_ubuntu_mcp_server(policy)
 
-    # Read host/port from environment or CLI
-    host = os.getenv("MCP_HOST", "0.0.0.0")
-    port = int(os.getenv("MCP_PORT", "8080"))
+    # --- Load network config from config.json ---
+    import json
+    from fastapi import FastAPI
+    import uvicorn
+    from fastapi.middleware.cors import CORSMiddleware
 
-    # Optional simple API key check for extra protection
-    api_key = os.getenv("MCP_API_KEY", None)
-    if api_key:
-        from fastapi import Request, HTTPException
-        @mcp_server.app.middleware("http")
-        async def verify_api_key(request: Request, call_next):
-            key = request.headers.get("x-api-key")
-            if key != api_key:
-                raise HTTPException(status_code=401, detail="Invalid API key")
-            return await call_next(request)
+    with open("config.json") as f:
+        config = json.load(f)
+    network_cfg = config.get("network", {})
+    host = network_cfg.get("host", "0.0.0.0")
+    port = int(network_cfg.get("port", 8080))
 
-    # Enable CORS if desired (for remote frontends)
-    try:
-        from fastapi.middleware.cors import CORSMiddleware
-        mcp_server.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],  # You can restrict to specific IPs or domains
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"Could not enable CORS: {e}")
+    # --- Create a FastAPI wrapper around MCP ---
+    app = FastAPI(title="Ubuntu MCP Remote Server")
 
-    # Run as remote server
-    mcp_server.run(host=host, port=port)
+    # Optional CORS support
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Basic root route for health check
+    @app.get("/")
+    async def root():
+        return {"status": "ok", "message": "Ubuntu MCP Server is running"}
+
+    # MCP endpoint: forward requests to the MCP handler
+    from fastapi import Request, Response
+
+    @app.post("/mcp")
+    async def handle_mcp(request: Request):
+        """Forward HTTP POST body to MCP stdin/stdout."""
+        body = await request.body()
+        try:
+            # Run the MCP server logic directly (simulate stdio call)
+            reader = asyncio.StreamReader()
+            protocol = asyncio.StreamReaderProtocol(reader)
+            transport, _ = await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, os.fdopen(0))
+            response_data = await mcp_server.handle(body.decode("utf-8"))
+            return Response(response_data, media_type="application/json")
+        except Exception as e:
+            return Response(str(e), status_code=500)
+
+    # --- Start the HTTP server ---
+    print(f"Serving MCP on http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
