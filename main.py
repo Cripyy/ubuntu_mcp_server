@@ -1011,5 +1011,13 @@ if __name__ == "__main__":
     async def root():
         return {"status": "ok", "message": "Ubuntu MCP Server is running"}
 
-    print(f"Serving MCP on http://{host}:{port}")
-    uvicorn.run(app, host=host, port=port)
+    use_https = network_cfg.get("use_https", False)
+    certfile = network_cfg.get("ssl_certfile")
+    keyfile = network_cfg.get("ssl_keyfile")
+
+    if use_https:
+        print(f"🔐 Serving MCP securely on https://{host}:{port}")
+        uvicorn.run(app, host=host, port=port, ssl_certfile=certfile, ssl_keyfile=keyfile)
+    else:
+        print(f"Serving MCP on http://{host}:{port}")
+        uvicorn.run(app, host=host, port=port)
