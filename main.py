@@ -982,17 +982,34 @@ async def main():
 
     print(f"Starting Secure Ubuntu MCP Server with '{args.policy}' policy...", file=sys.stderr)
     mcp_server = create_ubuntu_mcp_server(policy)
-    await mcp_server.run_stdio_async()
 
+    # Read host/port from environment or CLI
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("MCP_PORT", "8585"))
 
-if __name__ == "__main__":
-    import argparse
-    import sys
+    # Optional simple API key check for extra protection
+    api_key = os.getenv("MCP_API_KEY", None)
+    if api_key:
+        from fastapi import Request, HTTPException
+        @mcp_server.app.middleware("http")
+        async def verify_api_key(request: Request, call_next):
+            key = request.headers.get("x-api-key")
+            if key != api_key:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            return await call_next(request)
 
+    # Enable CORS if desired (for remote frontends)
     try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 Secure Ubuntu MCP Server stopped by user.", file=sys.stderr)
+        from fastapi.middleware.cors import CORSMiddleware
+        mcp_server.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],  # You can restrict to specific IPs or domains
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     except Exception as e:
-        logging.getLogger(__name__).critical(f"Server exited with a critical error: {e}", exc_info=True)
-        sys.exit(1)
+        logging.getLogger(__name__).warning(f"Could not enable CORS: {e}")
+
+    # Run as remote server
+    mcp_server.run(host=host, port=port)
