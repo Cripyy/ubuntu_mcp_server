@@ -1,5 +1,8 @@
 """
-Secure Ubuntu MCP Server (HTTPS Remote version)
+Secure Ubuntu MCP Server — Streamable HTTP (remote-ready)
+- HTTPS on :8585
+- MCP Streamable HTTP mounted at /mcp
+- Health + debug routes for quick checks
 """
 
 import argparse
@@ -8,21 +11,24 @@ import json
 import logging
 import os
 import sys
-from pathlib import Path
-from typing import Any, Dict
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import shlex
-import pwd, grp, stat, tempfile, shutil, time, subprocess, re
+import pwd, grp, stat, tempfile, shutil, time
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from mcp.server.fastmcp import FastMCP
-from uvicorn import Config, Server
+import uvicorn
 
-# --------------------------------------------------------------------------
-# Core security model
-# --------------------------------------------------------------------------
+# Core MCP server (Python SDK)
+from mcp.server.fastmcp import FastMCP
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Security / Policy
+# ────────────────────────────────────────────────────────────────────────────────
 
 class SecurityViolation(Exception):
     pass
@@ -35,15 +41,19 @@ class PermissionLevel(Enum):
 
 @dataclass
 class SecurityPolicy:
-    allowed_paths: list = field(default_factory=list)
-    forbidden_paths: list = field(default_factory=list)
-    allowed_commands: list = field(default_factory=list)
-    forbidden_commands: list = field(default_factory=list)
+    allowed_paths: List[str] = field(default_factory=list)
+    forbidden_paths: List[str] = field(default_factory=list)
+    allowed_commands: List[str] = field(default_factory=list)
+    forbidden_commands: List[str] = field(default_factory=list)
     command_whitelist_mode: bool = True
     max_command_timeout: int = 30
     max_file_size: int = 10 * 1024 * 1024
     max_output_size: int = 1024 * 1024
     allow_sudo: bool = False
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Controller with safe-ish helpers (kept pragmatic to get you running)
+# ────────────────────────────────────────────────────────────────────────────────
 
 class SecureUbuntuController:
     def __init__(self, policy: SecurityPolicy):
@@ -54,49 +64,105 @@ class SecureUbuntuController:
         except KeyError:
             self.current_user = str(os.getuid())
 
-    async def execute_command(self, command: str, working_dir: str = None) -> Dict[str, Any]:
+    async def execute_command(self, command: str, working_dir: Optional[str] = None) -> Dict[str, Any]:
+        # Minimal command guardrail (you can expand as needed)
+        if not command or not isinstance(command, str):
+            raise SecurityViolation("Empty command")
+
+        parts = shlex.split(command)
+        base = parts[0]
+
+        if base in self.policy.forbidden_commands:
+            raise SecurityViolation(f"Command forbidden: {base}")
+
+        if self.policy.command_whitelist_mode and base not in self.policy.allowed_commands:
+            raise SecurityViolation(f"Command not allowed by whitelist: {base}")
+
+        if base == "sudo" and not self.policy.allow_sudo:
+            raise SecurityViolation("sudo is disabled by policy")
+
+        # Clean environment
         env = os.environ.copy()
         for var in ["LD_PRELOAD", "LD_LIBRARY_PATH", "IFS"]:
             env.pop(var, None)
-        cmd_parts = shlex.split(command)
-        process = await asyncio.create_subprocess_exec(
-            *cmd_parts,
+
+        proc = await asyncio.create_subprocess_exec(
+            *parts,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=working_dir or None,
             env=env,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.policy.max_command_timeout)
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.policy.max_command_timeout)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            raise TimeoutError(f"Command timed out after {self.policy.max_command_timeout}s")
+
+        out = stdout.decode(errors="replace")
+        err = stderr.decode(errors="replace")
+
+        if len(out) > self.policy.max_output_size:
+            out = out[: self.policy.max_output_size] + "\n[...STDOUT TRUNCATED...]"
+        if len(err) > self.policy.max_output_size:
+            err = err[: self.policy.max_output_size] + "\n[...STDERR TRUNCATED...]"
+
         return {
-            "return_code": process.returncode,
-            "stdout": stdout.decode(errors="replace"),
-            "stderr": stderr.decode(errors="replace"),
-            "command": command
+            "return_code": proc.returncode,
+            "stdout": out,
+            "stderr": err,
+            "command": command,
+            "cwd": working_dir or os.getcwd(),
         }
 
-    def list_directory(self, path: str):
-        path_obj = Path(path).expanduser().resolve()
-        items = []
-        for item in path_obj.iterdir():
-            info = item.stat()
-            items.append({
-                "name": item.name,
-                "type": "directory" if item.is_dir() else "file",
-                "size": info.st_size,
-                "modified": info.st_mtime,
-            })
+    def list_directory(self, path: str) -> List[Dict[str, Any]]:
+        p = Path(path).expanduser().resolve()
+        if not p.exists() or not p.is_dir():
+            raise FileNotFoundError(f"Not a directory: {p}")
+
+        items: List[Dict[str, Any]] = []
+        for item in p.iterdir():
+            try:
+                st = item.stat()
+                items.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "type": "directory" if item.is_dir() else "file",
+                    "size": st.st_size,
+                    "modified": st.st_mtime,
+                })
+            except OSError as e:
+                items.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "type": "unreadable",
+                    "error": str(e),
+                })
         return items
 
     def read_file(self, file_path: str) -> str:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read()
+        p = Path(file_path).expanduser().resolve()
+        if not p.exists() or not p.is_file():
+            raise FileNotFoundError(str(p))
+        if p.stat().st_size > self.policy.max_file_size:
+            raise SecurityViolation("File too large")
+        return p.read_text(encoding="utf-8", errors="replace")
 
-    def write_file(self, file_path: str, content: str):
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
+    def write_file(self, file_path: str, content: str) -> bool:
+        p = Path(file_path).expanduser().resolve()
+        data = content.encode("utf-8")
+        if len(data) > self.policy.max_file_size:
+            raise SecurityViolation("Write exceeds max file size")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(f"{p}.tmp-{int(time.time())}")
+        tmp.write_bytes(data)
+        tmp.replace(p)
         return True
 
-    def get_system_info(self):
+    def get_system_info(self) -> Dict[str, Any]:
         return {
             "hostname": os.uname().nodename,
             "platform": os.uname().sysname,
@@ -104,166 +170,161 @@ class SecureUbuntuController:
             "user": self.current_user,
         }
 
-# --------------------------------------------------------------------------
-# Policy presets
-# --------------------------------------------------------------------------
+# ────────────────────────────────────────────────────────────────────────────────
+# Policies
+# ────────────────────────────────────────────────────────────────────────────────
 
 def create_secure_policy() -> SecurityPolicy:
-    home_dir = os.path.expanduser("~")
+    home = os.path.expanduser("~")
     return SecurityPolicy(
-        allowed_paths=[home_dir, "/tmp", "/var/tmp"],
-        forbidden_paths=["/etc/passwd", "/etc/shadow", "/root", "/boot", "/sys", "/proc"],
+        allowed_paths=[home, "/tmp", "/var/tmp"],
+        forbidden_paths=["/etc/shadow", "/root", "/boot", "/sys", "/proc"],
         allowed_commands=[
-            "ls", "cat", "echo", "pwd", "whoami", "date", "uname",
-            "grep", "find", "which", "file", "head", "tail",
-            "apt", "dpkg", "snap", "git", "curl", "wget",
-            "python3", "pip3", "npm", "node", "docker"
+            "ls","cat","echo","pwd","whoami","date","uname",
+            "grep","find","which","file","head","tail",
+            "apt","dpkg","snap","git","curl","wget",
+            "python3","pip3","npm","node","docker"
         ],
         forbidden_commands=[
-            "rm", "rmdir", "dd", "mkfs", "fdisk", "cfdisk",
-            "shutdown", "reboot", "halt", "init", "systemctl",
-            "service", "mount", "umount", "chmod", "chown"
+            "rm","rmdir","dd","mkfs","fdisk","cfdisk",
+            "shutdown","reboot","halt","init","systemctl",
+            "service","mount","umount","chmod","chown"
         ],
         allow_sudo=False,
+        command_whitelist_mode=True,
+        max_command_timeout=30,
+        max_file_size=10 * 1024 * 1024,
+        max_output_size=1 * 1024 * 1024,
     )
 
 def create_development_policy() -> SecurityPolicy:
-    home_dir = os.path.expanduser("~")
+    home = os.path.expanduser("~")
     return SecurityPolicy(
-        allowed_paths=[home_dir, "/tmp", "/var/tmp", "/opt", "/usr/local"],
-        forbidden_paths=["/etc/shadow", "/root"],
-        allowed_commands=[],
-        forbidden_commands=["rm", "shutdown", "reboot"],
+        allowed_paths=[home, "/tmp", "/var/tmp", "/opt", "/usr/local"],
+        forbidden_paths=["/etc/shadow","/root"],
+        allowed_commands=[],               # not used when whitelist_mode=False
+        forbidden_commands=["rm","shutdown","reboot"],
         allow_sudo=False,
-        command_whitelist_mode=False
+        command_whitelist_mode=False,
+        max_command_timeout=60,
+        max_file_size=10 * 1024 * 1024,
+        max_output_size=1 * 1024 * 1024,
     )
 
-# --------------------------------------------------------------------------
-# MCP setup
-# --------------------------------------------------------------------------
+# ────────────────────────────────────────────────────────────────────────────────
+# Build MCP server with your tools
+# ────────────────────────────────────────────────────────────────────────────────
 
-def create_ubuntu_mcp_server(policy: SecurityPolicy) -> FastMCP:
-    controller = SecureUbuntuController(policy)
+def build_mcp(policy: SecurityPolicy) -> FastMCP:
+    ctrl = SecureUbuntuController(policy)
     mcp = FastMCP("Ubuntu MCP Server")
 
-    # Track tools manually (since FastMCP doesn’t expose them)
-    mcp.tool_registry = {}
+    # Keep a registry so we can show tools at /debug/tools
+    mcp._tool_names: List[str] = []
 
-    def register_tool(name):
-        def wrapper(fn):
+    def register(name):
+        def deco(fn):
             mcp.tool(name)(fn)
-            mcp.tool_registry[name] = fn
+            mcp._tool_names.append(name)
             return fn
-        return wrapper
+        return deco
 
-    def to_json(data):
-        return json.dumps(data, indent=2)
+    @register("execute_command")
+    async def _execute_command(command: str, working_dir: Optional[str] = None) -> str:
+        return json.dumps(await ctrl.execute_command(command, working_dir), indent=2)
 
-    @register_tool("execute_command")
-    async def execute_command(command: str, working_dir: str = None):
-        result = await controller.execute_command(command, working_dir)
-        return to_json(result)
+    @register("list_directory")
+    def _list_directory(path: str) -> str:
+        return json.dumps(ctrl.list_directory(path), indent=2)
 
-    @register_tool("list_directory")
-    async def list_directory(path: str):
-        return to_json(controller.list_directory(path))
+    @register("read_file")
+    def _read_file(file_path: str) -> str:
+        return ctrl.read_file(file_path)
 
-    @register_tool("read_file")
-    async def read_file(file_path: str):
-        return controller.read_file(file_path)
+    @register("write_file")
+    def _write_file(file_path: str, content: str) -> str:
+        ok = ctrl.write_file(file_path, content)
+        return json.dumps({"success": ok, "path": file_path})
 
-    @register_tool("write_file")
-    async def write_file(file_path: str, content: str):
-        success = controller.write_file(file_path, content)
-        return to_json({"success": success, "path": file_path})
-
-    @register_tool("get_system_info")
-    async def get_system_info():
-        return to_json(controller.get_system_info())
+    @register("get_system_info")
+    def _get_system_info() -> str:
+        return json.dumps(ctrl.get_system_info(), indent=2)
 
     return mcp
 
-# --------------------------------------------------------------------------
-# FastAPI HTTPS Wrapper
-# --------------------------------------------------------------------------
+# ────────────────────────────────────────────────────────────────────────────────
+# App entry — mount Streamable HTTP at /mcp (Claude-friendly)
+# ────────────────────────────────────────────────────────────────────────────────
 
 async def main():
-    parser = argparse.ArgumentParser(description="Ubuntu MCP Server")
-    parser.add_argument("--policy", choices=["secure", "dev"], default="secure", help="Security policy to use")
+    parser = argparse.ArgumentParser(description="Secure Ubuntu MCP Server")
+    parser.add_argument("--policy", choices=["secure","dev"], default="secure")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level.upper())
 
-    # Load selected policy
-    if args.policy == "dev":
-        policy = create_development_policy()
-    else:
-        policy = create_secure_policy()
+    policy = create_development_policy() if args.policy == "dev" else create_secure_policy()
+    mcp = build_mcp(policy)
 
-    mcp_server = create_ubuntu_mcp_server(policy)
+    # Read network config (optional)
+    host = "0.0.0.0"
+    port = 8585
+    use_https = True
+    certfile = "/etc/ssl/mcp/mcp.crt"
+    keyfile  = "/etc/ssl/mcp/mcp.key"
+    cfg_file = Path("config.json")
+    if cfg_file.exists():
+        try:
+            cfg = json.loads(cfg_file.read_text())
+            net = cfg.get("network", {})
+            host      = net.get("host", host)
+            port      = int(net.get("port", port))
+            use_https = net.get("use_https", use_https)
+            certfile  = net.get("ssl_certfile", certfile)
+            keyfile   = net.get("ssl_keyfile", keyfile)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to parse config.json: {e}")
 
-    # Load network settings
-    with open("config.json") as f:
-        config = json.load(f)
-    network_cfg = config.get("network", {})
-    host = network_cfg.get("host", "0.0.0.0")
-    port = int(network_cfg.get("port", 8585))
-    use_https = network_cfg.get("use_https", True)
-    certfile = network_cfg.get("ssl_certfile", "/etc/ssl/mcp/mcp.crt")
-    keyfile = network_cfg.get("ssl_keyfile", "/etc/ssl/mcp/mcp.key")
-
-    # FastAPI
     app = FastAPI(title="Ubuntu MCP Remote Server")
+
+    # CORS + header exposure (Streamable HTTP uses Mcp-Session-Id header)
+    # This is recommended for HTTP clients and browser-based clients. :contentReference[oaicite:2]{index=2}
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET","POST","DELETE"],
         allow_headers=["*"],
+        expose_headers=["Mcp-Session-Id"],
     )
 
+    # Health / debug
     @app.get("/")
-    async def root():
+    async def health():
         return {"status": "ok", "message": "Ubuntu MCP Server running", "policy": args.policy}
 
-    @app.get("/mcp/tools")
-    async def list_tools():
-        return {"tools": list(mcp_server.tool_registry.keys())}
+    @app.get("/debug/tools")
+    async def debug_tools():
+        return {"tools": getattr(mcp, "_tool_names", [])}
 
-    @app.post("/mcp")
-    async def mcp_entry(request: Request):
-        """Dispatch request to the appropriate MCP tool."""
-        try:
-            data = await request.json()
-            tool_name = data.get("tool")
-            args = data.get("args", {})
-
-            if not tool_name:
-                return Response(json.dumps({"error": "Missing 'tool'"}), status_code=400)
-
-            tool_func = mcp_server.tool_registry.get(tool_name)
-            if not tool_func:
-                return Response(json.dumps({"error": f"Tool '{tool_name}' not found"}), status_code=404)
-
-            result = await tool_func(**args) if asyncio.iscoroutinefunction(tool_func) else tool_func(**args)
-            if not isinstance(result, str):
-                result = json.dumps(result)
-            return Response(result, media_type="application/json")
-        except Exception as e:
-            return Response(json.dumps({"error": str(e)}), status_code=500)
+    # Mount the MCP Streamable HTTP app at /mcp (default path)
+    # Docs note: streamable HTTP is the recommended replacement for SSE; default mount is /mcp. :contentReference[oaicite:3]{index=3}
+    app.mount("/mcp", mcp.streamable_http_app())
 
     # Start HTTPS server
-    ssl_params = {"ssl_certfile": certfile, "ssl_keyfile": keyfile} if use_https else {}
-    print(f"🔐 Serving Ubuntu MCP on {'https' if use_https else 'http'}://{host}:{port}  [policy={args.policy}]")
-    config = Config(app=app, host=host, port=port, **ssl_params)
-    server = Server(config)
+    ssl_kwargs = {"ssl_certfile": certfile, "ssl_keyfile": keyfile} if use_https else {}
+    scheme = "https" if use_https else "http"
+    print(f"🔐 Serving MCP ({args.policy}) on {scheme}://{host}:{port}/mcp")
+    print("   Health: {scheme}://{host}:{port}/")
+    config = uvicorn.Config(app=app, host=host, port=port, **ssl_kwargs)
+    server = uvicorn.Server(config)
     await server.serve()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n🛑 MCP Server stopped by user")
+        print("\n🛑 Stopped")
     except Exception as e:
-        logging.getLogger(__name__).critical(f"Server exited with error: {e}", exc_info=True)
+        logging.getLogger(__name__).critical(f"Fatal: {e}", exc_info=True)
         sys.exit(1)
