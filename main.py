@@ -210,7 +210,7 @@ async def main():
 
     @app.get("/mcp/tools")
     async def list_tools():
-        return {"tools": list(mcp_server.tools.keys())}
+        return {"tools": list(mcp_server.tool.keys())}
 
     @app.post("/mcp")
     async def mcp_entry(request: Request):
@@ -223,7 +223,7 @@ async def main():
             if not tool_name:
                 return Response(json.dumps({"error": "Missing 'tool'"}), status_code=400)
 
-            tool_func = mcp_server.tools.get(tool_name)
+            tool_func = mcp_server.tool.get(tool_name)
             if not tool_func:
                 return Response(json.dumps({"error": f"Tool '{tool_name}' not found"}), status_code=404)
 
