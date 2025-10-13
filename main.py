@@ -984,7 +984,8 @@ if __name__ == "__main__":
     import sys
     import uvicorn
     import json
-    from fastapi import FastAPI
+    import asyncio
+    from fastapi import FastAPI,Request,Response
     from fastapi.middleware.cors import CORSMiddleware
 
     policy = asyncio.run(main())
@@ -997,8 +998,10 @@ if __name__ == "__main__":
     host = network_cfg.get("host", "0.0.0.0")
     port = int(network_cfg.get("port", 8080))
 
-    # --- Build FastAPI wrapper ---
+    # --- Create FastAPI wrapper around MCP ---
     app = FastAPI(title="Ubuntu MCP Remote Server")
+
+    # Optional CORS (needed for Claude / LM Studio)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -1007,9 +1010,45 @@ if __name__ == "__main__":
         allow_headers=["*"],
     )
 
+
+    # Health check endpoint (optional, for testing)
     @app.get("/")
     async def root():
         return {"status": "ok", "message": "Ubuntu MCP Server is running"}
+
+
+    # --- MCP JSON endpoint ---
+    @app.post("/mcp")
+    async def mcp_entry(request: Request):
+        """Generic MCP endpoint: forwards JSON requests to the FastMCP tool dispatcher."""
+        try:
+            data = await request.json()
+            tool_name = data.get("tool")
+            args = data.get("args", {})
+
+            if not tool_name:
+                return Response(json.dumps({"error": "Missing 'tool' in request"}), status_code=400)
+
+            # Look up the registered tool
+            tool_func = mcp_server.tools.get(tool_name)
+            if not tool_func:
+                return Response(json.dumps({"error": f"Tool '{tool_name}' not found"}), status_code=404)
+
+            # Run it (tools may be async)
+            if asyncio.iscoroutinefunction(tool_func):
+                result = await tool_func(**args)
+            else:
+                result = tool_func(**args)
+
+            # Ensure JSON string output
+            if not isinstance(result, str):
+                result = json.dumps(result)
+
+            return Response(result, media_type="application/json")
+
+        except Exception as e:
+            return Response(json.dumps({"error": str(e)}), status_code=500)
+
 
     use_https = network_cfg.get("use_https", False)
     certfile = network_cfg.get("ssl_certfile")
