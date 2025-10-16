@@ -19,9 +19,10 @@ from typing import Any, Dict, List, Optional
 import shlex
 import pwd, grp, stat, tempfile, shutil, time
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 # Core MCP server (Python SDK)
 from mcp.server.fastmcp import FastMCP
@@ -215,9 +216,22 @@ def create_development_policy() -> SecurityPolicy:
 # Build MCP server with your tools
 # ────────────────────────────────────────────────────────────────────────────────
 
-def build_mcp(policy: SecurityPolicy) -> FastMCP:
+def build_mcp(
+    policy: SecurityPolicy,
+    *,
+    log_level: str,
+    host: str,
+    port: int,
+    policy_name: str,
+) -> FastMCP:
     ctrl = SecureUbuntuController(policy)
-    mcp = FastMCP("Ubuntu MCP Server")
+    mcp = FastMCP(
+        "Ubuntu MCP Server",
+        log_level=log_level,
+        host=host,
+        port=port,
+        streamable_http_path="/mcp",
+    )
 
     # Keep a registry so we can show tools at /debug/tools
     mcp._tool_names: List[str] = []
@@ -227,6 +241,7 @@ def build_mcp(policy: SecurityPolicy) -> FastMCP:
             mcp.tool(name)(fn)
             mcp._tool_names.append(name)
             return fn
+
         return deco
 
     @register("execute_command")
@@ -250,6 +265,14 @@ def build_mcp(policy: SecurityPolicy) -> FastMCP:
     def _get_system_info() -> str:
         return json.dumps(ctrl.get_system_info(), indent=2)
 
+    @mcp.custom_route("/", methods=["GET"])
+    async def health(_: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "message": "Ubuntu MCP Server running", "policy": policy_name})
+
+    @mcp.custom_route("/debug/tools", methods=["GET"])
+    async def debug_tools(_: Request) -> JSONResponse:
+        return JSONResponse({"tools": getattr(mcp, "_tool_names", [])})
+
     return mcp
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -264,7 +287,6 @@ async def main():
     logging.basicConfig(level=args.log_level.upper())
 
     policy = create_development_policy() if args.policy == "dev" else create_secure_policy()
-    mcp = build_mcp(policy)
 
     # Read network config (optional)
     host = "0.0.0.0"
@@ -285,38 +307,30 @@ async def main():
         except Exception as e:
             logging.getLogger(__name__).warning(f"Failed to parse config.json: {e}")
 
-    app = FastAPI(title="Ubuntu MCP Remote Server")
+    mcp = build_mcp(
+        policy,
+        log_level=args.log_level.upper(),
+        host=host,
+        port=port,
+        policy_name=args.policy,
+    )
 
-    # CORS + header exposure (Streamable HTTP uses Mcp-Session-Id header)
-    # This is recommended for HTTP clients and browser-based clients. :contentReference[oaicite:2]{index=2}
+    app = mcp.streamable_http_app()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
         allow_credentials=True,
-        allow_methods=["GET","POST","DELETE"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
         expose_headers=["Mcp-Session-Id"],
     )
 
-    # Health / debug
-    @app.get("/")
-    async def health():
-        return {"status": "ok", "message": "Ubuntu MCP Server running", "policy": args.policy}
-
-    @app.get("/debug/tools")
-    async def debug_tools():
-        return {"tools": getattr(mcp, "_tool_names", [])}
-
-    # Mount the MCP Streamable HTTP app at /mcp (default path)
-    # Docs note: streamable HTTP is the recommended replacement for SSE; default mount is /mcp. :contentReference[oaicite:3]{index=3}
-    app.mount("/mcp", mcp.streamable_http_app())
-
-    # Start HTTPS server
+    # Start HTTPS server (optional)
     ssl_kwargs = {"ssl_certfile": certfile, "ssl_keyfile": keyfile} if use_https else {}
     scheme = "https" if use_https else "http"
     print(f"🔐 Serving MCP ({args.policy}) on {scheme}://{host}:{port}/mcp")
-    print("   Health: {scheme}://{host}:{port}/")
-    config = uvicorn.Config(app=app, host=host, port=port, **ssl_kwargs)
+    print(f"   Health: {scheme}://{host}:{port}/")
+    config = uvicorn.Config(app=app, host=host, port=port, log_level=args.log_level.lower(), **ssl_kwargs)
     server = uvicorn.Server(config)
     await server.serve()
 
