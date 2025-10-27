@@ -719,8 +719,8 @@ def create_development_policy() -> SecurityPolicy:
 def create_ubuntu_mcp_server(
     security_policy: SecurityPolicy,
     *,
-    host: str = "0.0.0.0",
-    port: int = 8585,
+    host: str = "127.0.0.1",
+    port: int = 8000,
 ) -> FastMCP:
     """Create and configure the secure Ubuntu MCP server.
 
@@ -964,35 +964,6 @@ async def test_controller():
         print(f"❌ A functional test failed: {e}")
         import traceback
         traceback.print_exc()
-
-
-async def _serve_uvicorn_app(
-    app,
-    *,
-    host: str,
-    port: int,
-    log_level: str,
-    ssl_certfile: Optional[str] = None,
-    ssl_keyfile: Optional[str] = None,
-    ssl_key_password: Optional[str] = None,
-    ssl_ca_file: Optional[str] = None,
-):
-    """Run a uvicorn server for the provided ASGI app with optional TLS."""
-
-    import uvicorn
-
-    config = uvicorn.Config(
-        app,
-        host=host,
-        port=port,
-        log_level=(log_level or "info").lower(),
-        ssl_certfile=ssl_certfile,
-        ssl_keyfile=ssl_keyfile,
-        ssl_keyfile_password=ssl_key_password,
-        ssl_ca_certs=ssl_ca_file,
-    )
-    server = uvicorn.Server(config)
-    await server.serve()
 
 
 async def main():
