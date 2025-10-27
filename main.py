@@ -843,7 +843,9 @@ async def main():
     _print_boot(cfg, using_https=bool(ssl_params))
 
     import uvicorn
-    uvicorn.run(app, host=host, port=port, **ssl_params)
+    config = uvicorn.Config(app=app, host=host, port=port, **ssl_params)
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 if __name__ == "__main__":
