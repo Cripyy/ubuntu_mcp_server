@@ -719,8 +719,8 @@ def create_development_policy() -> SecurityPolicy:
 def create_ubuntu_mcp_server(
     security_policy: SecurityPolicy,
     *,
-    host: str = "127.0.0.1",
-    port: int = 8000,
+    host: str = "0.0.0.0",
+    port: int = 8585,
 ) -> FastMCP:
     """Create and configure the secure Ubuntu MCP server.
 
