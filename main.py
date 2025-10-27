@@ -781,10 +781,9 @@ async def _run_stdio(mcp: FastMCP):
     # Preserve original behavior (local stdio)
     await mcp.run_stdio_async()
 
-def _build_ssl_context(ssl_cfg: dict):
-    import ssl as _ssl
+def _get_ssl_params(ssl_cfg: dict) -> dict:
     if not ssl_cfg.get("enabled"):
-        return None
+        return {}
     certfile = ssl_cfg.get("certfile")
     keyfile = ssl_cfg.get("keyfile")
     if not certfile or not keyfile:
@@ -793,9 +792,8 @@ def _build_ssl_context(ssl_cfg: dict):
         raise FileNotFoundError(f"SSL cert not found: {certfile}")
     if not os.path.exists(keyfile):
         raise FileNotFoundError(f"SSL key not found: {keyfile}")
-    ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(certfile, keyfile)
-    return ctx
+    return {"ssl_certfile": certfile, "ssl_keyfile": keyfile}
+
 
 def _print_boot(cfg: dict, using_https: bool):
     host = cfg.get("host", "0.0.0.0")
@@ -841,11 +839,11 @@ async def main():
     app = _build_starlette_sse_app(mcp_server)
     host = cfg.get("host", "0.0.0.0")
     port = int(cfg.get("port", 8585))
-    ssl_context = _build_ssl_context(cfg.get("ssl", {}))
-    _print_boot(cfg, using_https=ssl_context is not None)
+    ssl_params = _get_ssl_params(cfg.get("ssl", {}))
+    _print_boot(cfg, using_https=bool(ssl_params))
 
     import uvicorn
-    uvicorn.run(app, host=host, port=port, ssl_context=ssl_context)
+    uvicorn.run(app, host=host, port=port, **ssl_params)
 
 
 if __name__ == "__main__":
