@@ -1024,22 +1024,6 @@ async def main():
         default="/",
         help="Mount path when using the SSE transport",
     )
-    parser.add_argument(
-        "--ssl-certfile",
-        help="Path to an SSL/TLS certificate for HTTPS transports",
-    )
-    parser.add_argument(
-        "--ssl-keyfile",
-        help="Path to the SSL/TLS private key for HTTPS transports",
-    )
-    parser.add_argument(
-        "--ssl-key-password",
-        help="Password for the encrypted SSL/TLS private key",
-    )
-    parser.add_argument(
-        "--ssl-ca-file",
-        help="Optional CA bundle to present to clients when using HTTPS",
-    )
 
     args = parser.parse_args()
 
@@ -1058,24 +1042,6 @@ async def main():
     else:
         policy = create_secure_policy()
 
-    tls_requested = any([args.ssl_certfile, args.ssl_keyfile, args.ssl_ca_file])
-    if tls_requested:
-        if args.transport == "stdio":
-            parser.error("TLS options can only be used with network transports (sse or streamable-http).")
-        if not args.ssl_certfile or not args.ssl_keyfile:
-            parser.error("Using TLS requires both --ssl-certfile and --ssl-keyfile to be provided.")
-
-        def _resolve_existing_path(label: str, path_value: str) -> str:
-            resolved = os.path.abspath(os.path.expanduser(path_value))
-            if not os.path.isfile(resolved):
-                parser.error(f"{label} '{path_value}' does not exist or is not a file.")
-            return resolved
-
-        args.ssl_certfile = _resolve_existing_path("SSL certificate", args.ssl_certfile)
-        args.ssl_keyfile = _resolve_existing_path("SSL private key", args.ssl_keyfile)
-        if args.ssl_ca_file:
-            args.ssl_ca_file = _resolve_existing_path("SSL CA bundle", args.ssl_ca_file)
-
     mcp_server = create_ubuntu_mcp_server(
         policy,
         host=args.host,
@@ -1091,42 +1057,20 @@ async def main():
         return
 
     if args.transport == "sse":
-        scheme = "https" if args.ssl_certfile else "http"
         print(
             "Starting Secure Ubuntu MCP Server "
-            f"with '{args.policy}' policy using SSE transport on {scheme}://{args.host}:{args.port}{args.mount_path}",
+            f"with '{args.policy}' policy using SSE transport on {args.host}:{args.port}{args.mount_path}",
             file=sys.stderr,
         )
-        starlette_app = mcp_server.sse_app(args.mount_path)
-        await _serve_uvicorn_app(
-            starlette_app,
-            host=args.host,
-            port=args.port,
-            log_level=args.log_level,
-            ssl_certfile=args.ssl_certfile,
-            ssl_keyfile=args.ssl_keyfile,
-            ssl_key_password=args.ssl_key_password,
-            ssl_ca_file=args.ssl_ca_file,
-        )
+        await mcp_server.run_sse_async(mount_path=args.mount_path)
         return
 
-    scheme = "https" if args.ssl_certfile else "http"
     print(
         "Starting Secure Ubuntu MCP Server "
-        f"with '{args.policy}' policy using Streamable HTTP transport on {scheme}://{args.host}:{args.port}",
+        f"with '{args.policy}' policy using Streamable HTTP transport on {args.host}:{args.port}",
         file=sys.stderr,
     )
-    streamable_app = mcp_server.streamable_http_app()
-    await _serve_uvicorn_app(
-        streamable_app,
-        host=args.host,
-        port=args.port,
-        log_level=args.log_level,
-        ssl_certfile=args.ssl_certfile,
-        ssl_keyfile=args.ssl_keyfile,
-        ssl_key_password=args.ssl_key_password,
-        ssl_ca_file=args.ssl_ca_file,
-    )
+    await mcp_server.run_streamable_http_async()
 
 
 if __name__ == "__main__":
