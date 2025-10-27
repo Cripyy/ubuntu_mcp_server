@@ -5,15 +5,16 @@
     "description": "MCP Server for Ubuntu System Control",
     "log_level": "INFO"
   },
-  "network": {
+  "host": "0.0.0.0",
+  "port": 8585,
+  "policy": "secure",
+  "transport": "http",
+  "ssl": {
     "enabled": true,
-    "host": "0.0.0.0",
-    "port": 8585,
-    "use_https": true,
-    "ssl_certfile": "/etc/ssl/mcp/mcp.crt",
-    "ssl_keyfile": "/etc/ssl/mcp/mcp.key"
-  },
-  "remotes": [
+    "certfile": "/etc/ssl/mcp/mcp.crt",
+    "keyfile": "/etc/ssl/mcp/mcp.key"
+    },
+  "servers": [
     {
       "name": "local",
       "type": "local"
