@@ -1,13 +1,11 @@
 """
-Secure Ubuntu MCP Server (HTTPS-ready)
+Secure Ubuntu MCP Server (HTTPS-ready via SSE)
 
-This version keeps the original security & tools intact, adds:
-- config.json (host/port/policy/ssl/servers)
+This version preserves your original security & tools, adds:
+- config.json (host/port/policy/ssl/servers/transport)
 - HTTPS (TLS) via uvicorn
-- HTTP/SSE transport for remote MCP clients (e.g., Claude)
+- HTTP/SSE transport with Starlette for Claude Desktop (endpoint: /sse)
 
-If your installed mcp package offers a different ASGI adapter name,
-the code tries several options and raises a clear error with guidance.
 """
 
 import asyncio
@@ -29,11 +27,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 import re
 
-from mcp.server.fastmcp import FastMCP  # unchanged
+from mcp.server.fastmcp import FastMCP  # original dependency
 
-# -------------------------
-# Security & Controller (UNCHANGED)
-# -------------------------
+# =========================
+# Security & Controller (unchanged logic)
+# =========================
 
 class SecurityViolation(Exception):
     """Raised when a security policy violation is detected"""
@@ -628,9 +626,9 @@ def create_ubuntu_mcp_server(security_policy: SecurityPolicy) -> FastMCP:
     return mcp
 
 
-# -------------------------
-# Optional test runners (UNCHANGED)
-# -------------------------
+# =========================
+# Optional test runners (kept)
+# =========================
 
 async def run_security_tests():
     print("=== Running Security Tests ===")
@@ -730,9 +728,9 @@ async def test_controller():
         traceback.print_exc()
 
 
-# -------------------------
-# HTTPS / Config-enabled entrypoint (NEW)
-# -------------------------
+# =========================
+# HTTPS / SSE Server (NEW)
+# =========================
 
 def _load_config(path: str = "config.json") -> dict:
     if not os.path.exists(path):
@@ -746,44 +744,41 @@ def _build_policy(policy_name: str) -> SecurityPolicy:
     return create_secure_policy()
 
 def _attach_context_from_config(mcp: FastMCP, cfg: dict):
-    # Make servers (and anything else later) discoverable by tools
+    # Make servers discoverable by tools
     mcp.context = getattr(mcp, "context", {})
     mcp.context["servers"] = cfg.get("servers", [])
 
-def _build_asgi_app(mcp: FastMCP):
+def _build_starlette_sse_app(mcp: FastMCP):
     """
-    Build an ASGI app that serves MCP over HTTP/SSE.
-    Different mcp versions expose different adapters—try the common ones.
+    Build a Starlette app that exposes SSE endpoints for MCP:
+      - GET /sse           (SSE stream)
+      - POST /messages/    (post messages)
+    Pattern based on public examples using SseServerTransport.
     """
-    # 1) Hypothetical helper on FastMCP (some versions expose this)
-    for attr in ("to_fastapi", "create_fastapi_app", "to_asgi_app", "to_asgi"):
-        if hasattr(mcp, attr):
-            app = getattr(mcp, attr)()
-            return app
+    from starlette.applications import Starlette
+    from starlette.routing import Route, Mount
+    from mcp.server.sse import SseServerTransport
 
-    # 2) Via mcp.server.sse (common pattern)
-    try:
-        from mcp.server.sse import app as sse_app_factory  # e.g., a callable returning an ASGI app
-        return sse_app_factory(mcp)
-    except Exception:
-        pass
+    transport = SseServerTransport("/messages/")
 
-    try:
-        from mcp.server import sse
-        if hasattr(sse, "create_app"):
-            return sse.create_app(mcp)
-    except Exception:
-        pass
+    async def handle_sse(request):
+        # Establish SSE connection and delegate to MCP server
+        async with transport.connect_sse(request.scope, request.receive, request._send) as streams:
+            read_stream, write_stream = streams
+            await mcp._mcp_server.run(  # uses FastMCP's underlying server
+                read_stream,
+                write_stream,
+                mcp._mcp_server.create_initialization_options()
+            )
 
-    # 3) Last resort: clear error to guide installation
-    raise RuntimeError(
-        "Could not create an HTTP/SSE ASGI app for FastMCP. "
-        "Please ensure your 'mcp' package is up to date. "
-        "Tried: FastMCP.to_fastapi/create_fastapi_app/to_asgi_app/to_asgi and mcp.server.sse adapters."
-    )
+    routes = [
+        Route("/sse", endpoint=handle_sse),                # Claude connects here (GET)
+        Mount("/messages/", app=transport.handle_post_message),  # Client POSTs messages here
+    ]
+    return Starlette(routes=routes)
 
 async def _run_stdio(mcp: FastMCP):
-    # Preserve original behavior
+    # Preserve original behavior (local stdio)
     await mcp.run_stdio_async()
 
 def _build_ssl_context(ssl_cfg: dict):
@@ -809,10 +804,12 @@ def _print_boot(cfg: dict, using_https: bool):
     print(f"🚀 Secure Ubuntu MCP Server listening at {scheme}://{host}:{port}")
     if using_https:
         print("🔒 TLS is enabled")
+    print("📡 SSE endpoint: /sse (use this URL in Claude Desktop)")
+
 
 async def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Secure Ubuntu MCP Server (HTTPS-ready)")
+    parser = argparse.ArgumentParser(description="Secure Ubuntu MCP Server (HTTPS-ready via SSE)")
     parser.add_argument("--security-test", action="store_true", help="Run security validation tests and exit")
     parser.add_argument("--test", action="store_true", help="Run functionality tests and exit")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
@@ -830,19 +827,18 @@ async def main():
         return
 
     cfg = _load_config(args.config)
-
     policy = _build_policy(cfg.get("policy", "secure"))
     mcp_server = create_ubuntu_mcp_server(policy)
     _attach_context_from_config(mcp_server, cfg)
 
     transport = cfg.get("transport", "http").lower()
     if transport == "stdio":
-        print("ℹ️ Transport = stdio (local). To use HTTPS, set \"transport\": \"http\" in config.json")
+        print("ℹ️ Transport = stdio (local). To use HTTPS+SSE, set \"transport\": \"http\" in config.json")
         await _run_stdio(mcp_server)
         return
 
     # HTTP/SSE + HTTPS (for Claude)
-    app = _build_asgi_app(mcp_server)
+    app = _build_starlette_sse_app(mcp_server)
     host = cfg.get("host", "0.0.0.0")
     port = int(cfg.get("port", 8585))
     ssl_context = _build_ssl_context(cfg.get("ssl", {}))
