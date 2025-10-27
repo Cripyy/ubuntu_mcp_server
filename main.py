@@ -716,10 +716,21 @@ def create_development_policy() -> SecurityPolicy:
     )
 
 
-def create_ubuntu_mcp_server(security_policy: SecurityPolicy) -> FastMCP:
-    """Create and configure the secure Ubuntu MCP server"""
+def create_ubuntu_mcp_server(
+    security_policy: SecurityPolicy,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+) -> FastMCP:
+    """Create and configure the secure Ubuntu MCP server.
+
+    Args:
+        security_policy: The security policy that governs server behavior.
+        host: Host interface that FastMCP should bind when using network transports.
+        port: TCP port FastMCP should bind when using network transports.
+    """
     controller = SecureUbuntuController(security_policy)
-    mcp = FastMCP("Secure Ubuntu Controller")
+    mcp = FastMCP("Secure Ubuntu Controller", host=host, port=port)
 
     def format_error(e: Exception) -> str:
         return json.dumps({"error": str(e), "type": type(e).__name__}, indent=2)
@@ -962,6 +973,28 @@ async def main():
     parser.add_argument("--test", action="store_true", help="Run functionality tests")
     parser.add_argument("--security-test", action="store_true", help="Run security validation tests")
     parser.add_argument("--log-level", default="INFO", help="Logging level (e.g., DEBUG, INFO, WARNING)")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help="Transport to use when hosting the MCP server",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host interface for network transports (use 0.0.0.0 for remote access)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind for network transports",
+    )
+    parser.add_argument(
+        "--mount-path",
+        default="/",
+        help="Mount path when using the SSE transport",
+    )
 
     args = parser.parse_args()
 
@@ -980,9 +1013,35 @@ async def main():
     else:
         policy = create_secure_policy()
 
-    print(f"Starting Secure Ubuntu MCP Server with '{args.policy}' policy...", file=sys.stderr)
-    mcp_server = create_ubuntu_mcp_server(policy)
-    await mcp_server.run_stdio_async()
+    mcp_server = create_ubuntu_mcp_server(
+        policy,
+        host=args.host,
+        port=args.port,
+    )
+
+    if args.transport == "stdio":
+        print(
+            f"Starting Secure Ubuntu MCP Server with '{args.policy}' policy using stdio transport...",
+            file=sys.stderr,
+        )
+        await mcp_server.run_stdio_async()
+        return
+
+    if args.transport == "sse":
+        print(
+            "Starting Secure Ubuntu MCP Server "
+            f"with '{args.policy}' policy using SSE transport on {args.host}:{args.port}{args.mount_path}",
+            file=sys.stderr,
+        )
+        await mcp_server.run_sse_async(mount_path=args.mount_path)
+        return
+
+    print(
+        "Starting Secure Ubuntu MCP Server "
+        f"with '{args.policy}' policy using Streamable HTTP transport on {args.host}:{args.port}",
+        file=sys.stderr,
+    )
+    await mcp_server.run_streamable_http_async()
 
 
 if __name__ == "__main__":
